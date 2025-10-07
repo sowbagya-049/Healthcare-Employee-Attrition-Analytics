@@ -647,7 +647,7 @@ If you use this project in your research or work, please cite:
   author = {Your Name},
   title = {Healthcare Employee Attrition Analysis},
   year = {2024},
-  url = {https://github.com/yourusername/healthcare-attrition-analysis}
+  url = {https://github.com//healthcare-attrition-analysis}
 }
 ```
 
