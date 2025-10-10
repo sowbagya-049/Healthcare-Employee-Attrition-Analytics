@@ -49,7 +49,7 @@ outputs/
 *.png
 *.jpg
 *.pdf
-*.txt
+
 
 # Model files
 *.pkl

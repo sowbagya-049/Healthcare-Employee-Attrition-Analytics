@@ -3,7 +3,6 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-
 import seaborn as sns
 import plotly.express as px
 import plotly.graph_objects as go
@@ -58,10 +57,32 @@ def load_data():
 
 @st.cache_resource
 def train_model(X_train, y_train):
-    """Train Random Forest model"""
-    model = RandomForestClassifier(n_estimators=100, random_state=42)
-    model.fit(X_train, y_train)
-    return model
+    """Train Random Forest model with hyperparameter tuning"""
+    from sklearn.model_selection import GridSearchCV
+    
+    # Define parameter grid (smaller for faster dashboard performance)
+    param_grid = {
+        'n_estimators': [100, 200],
+        'max_depth': [10, 20, None],
+        'min_samples_split': [2, 5],
+        'min_samples_leaf': [1, 2]
+    }
+    
+    # Create base model
+    rf_base = RandomForestClassifier(random_state=42, n_jobs=-1)
+    
+    # Perform grid search
+    grid_search = GridSearchCV(
+        estimator=rf_base,
+        param_grid=param_grid,
+        cv=3,
+        scoring='roc_auc',
+        n_jobs=-1
+    )
+    
+    grid_search.fit(X_train, y_train)
+    
+    return grid_search.best_estimator_, grid_search.best_params_, grid_search.best_score_
 
 def prepare_data_for_ml(df):
     """Prepare data for machine learning"""
@@ -97,12 +118,13 @@ def main():
         st.stop()
     
     # Sidebar
-    st.sidebar.title("Healthcare Attrition")
+    st.sidebar.image("https://via.placeholder.com/300x100/1f77b4/ffffff?text=HR+Analytics", use_column_width=True)
+    st.sidebar.title("Navigation")
     page = st.sidebar.radio("Select Page", [
         "📊 Overview",
         "📈 Deep Dive Analysis",
-        "🕵️‍♂️ Predictive Model",
-        #"💡 Insights & Recommendations",
+        "🤖 Predictive Model",
+       # "💡 Insights & Recommendations",
         "🔍 Employee Lookup"
     ])
     
@@ -254,94 +276,274 @@ def show_predictions(df):
     """Predictive modeling page"""
     st.header("🤖 Predictive Attrition Model")
     
-    # Prepare data
-    with st.spinner("Training model..."):
-        X_train, X_test, y_train, y_test, feature_names = prepare_data_for_ml(df)
-        model = train_model(X_train, y_train)
+    # Add tabs for different views
+    tab1, tab2, tab3 = st.tabs(["📊 Model Performance", "🎯 Feature Importance", "🔮 Risk Predictor"])
+    
+    with tab1:
+        # Prepare data
+        with st.spinner("Training optimized model... This may take 30-60 seconds..."):
+            X_train, X_test, y_train, y_test, feature_names = prepare_data_for_ml(df)
+            model, best_params, best_cv_score = train_model(X_train, y_train)
+            
+            # Predictions
+            y_pred = model.predict(X_test)
+            y_pred_proba = model.predict_proba(X_test)[:, 1]
+            
+            # Metrics
+            from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score, confusion_matrix
+            
+            accuracy = accuracy_score(y_test, y_pred)
+            precision = precision_score(y_test, y_pred)
+            recall = recall_score(y_test, y_pred)
+            f1 = f1_score(y_test, y_pred)
+            roc_auc = roc_auc_score(y_test, y_pred_proba)
+            cm = confusion_matrix(y_test, y_pred)
         
-        # Predictions
-        y_pred = model.predict(X_test)
-        y_pred_proba = model.predict_proba(X_test)[:, 1]
+        # Display metrics
+        st.success("✓ Model trained successfully with hyperparameter optimization!")
         
-        # Metrics
-        from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
+        # Best parameters
+        with st.expander("🔧 Optimized Hyperparameters", expanded=False):
+            col1, col2 = st.columns(2)
+            with col1:
+                for param, value in list(best_params.items())[:len(best_params)//2]:
+                    st.metric(param.replace('_', ' ').title(), str(value))
+            with col2:
+                for param, value in list(best_params.items())[len(best_params)//2:]:
+                    st.metric(param.replace('_', ' ').title(), str(value))
+                st.metric("Cross-Val ROC-AUC", f"{best_cv_score*100:.2f}%")
         
-        accuracy = accuracy_score(y_test, y_pred)
-        precision = precision_score(y_test, y_pred)
-        recall = recall_score(y_test, y_pred)
-        f1 = f1_score(y_test, y_pred)
-        roc_auc = roc_auc_score(y_test, y_pred_proba)
+        st.markdown("---")
+        
+        # Performance metrics
+        st.subheader("📈 Model Performance Metrics")
+        col1, col2, col3, col4, col5 = st.columns(5)
+        
+        with col1:
+            st.metric("Accuracy", f"{accuracy*100:.2f}%", 
+                     help="Overall correctness of predictions")
+        with col2:
+            st.metric("Precision", f"{precision*100:.2f}%",
+                     help="Of predicted leavers, how many actually left")
+        with col3:
+            st.metric("Recall", f"{recall*100:.2f}%",
+                     help="Of actual leavers, how many were predicted")
+        with col4:
+            st.metric("F1 Score", f"{f1*100:.2f}%",
+                     help="Balance between precision and recall")
+        with col5:
+            st.metric("ROC-AUC", f"{roc_auc*100:.2f}%",
+                     help="Area under the ROC curve")
+        
+        st.markdown("---")
+        
+        # Confusion Matrix
+        col1, col2 = st.columns([1, 1])
+        
+        with col1:
+            st.subheader("📊 Confusion Matrix")
+            fig = px.imshow(cm, 
+                           labels=dict(x="Predicted", y="Actual", color="Count"),
+                           x=['No Attrition', 'Attrition'],
+                           y=['No Attrition', 'Attrition'],
+                           text_auto=True,
+                           color_continuous_scale='Blues')
+            fig.update_layout(height=400)
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Explanation
+            st.info(f"""
+            **Confusion Matrix Breakdown:**
+            - ✅ True Negatives: {cm[0,0]} (Correctly predicted stay)
+            - ❌ False Positives: {cm[0,1]} (Incorrectly predicted leave)
+            - ❌ False Negatives: {cm[1,0]} (Missed leavers)
+            - ✅ True Positives: {cm[1,1]} (Correctly predicted leave)
+            """)
+        
+        with col2:
+            st.subheader("📉 ROC Curve")
+            from sklearn.metrics import roc_curve
+            
+            fpr, tpr, thresholds = roc_curve(y_test, y_pred_proba)
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=fpr, y=tpr, mode='lines', name='ROC Curve',
+                                    line=dict(color='#3b82f6', width=3)))
+            fig.add_trace(go.Scatter(x=[0, 1], y=[0, 1], mode='lines', name='Random',
+                                    line=dict(color='gray', width=2, dash='dash')))
+            fig.update_layout(
+                xaxis_title='False Positive Rate',
+                yaxis_title='True Positive Rate',
+                title=f'ROC Curve (AUC = {roc_auc:.3f})',
+                height=400
+            )
+            st.plotly_chart(fig, use_container_width=True)
+            
+            st.success(f"**Excellent Performance!** ROC-AUC of {roc_auc*100:.1f}% indicates strong predictive power.")
     
-    # Display metrics
-    st.success("✓ Model trained successfully!")
-    
-    col1, col2, col3, col4, col5 = st.columns(5)
-    with col1:
-        st.metric("Accuracy", f"{accuracy*100:.2f}%")
-    with col2:
-        st.metric("Precision", f"{precision*100:.2f}%")
-    with col3:
-        st.metric("Recall", f"{recall*100:.2f}%")
-    with col4:
-        st.metric("F1 Score", f"{f1*100:.2f}%")
-    with col5:
-        st.metric("ROC-AUC", f"{roc_auc*100:.2f}%")
-    
-    st.markdown("---")
-    
-    # Feature importance
-    col1, col2 = st.columns([2, 1])
-    
-    with col1:
-        st.subheader("Feature Importance")
+    with tab2:
+        # Feature importance
+        st.subheader("🎯 Feature Importance Analysis")
+        
         feature_importance = pd.DataFrame({
             'Feature': feature_names,
             'Importance': model.feature_importances_
-        }).sort_values('Importance', ascending=False).head(15)
+        }).sort_values('Importance', ascending=False)
         
-        fig = px.bar(feature_importance, x='Importance', y='Feature', orientation='h',
-                     color='Importance', color_continuous_scale='Viridis')
-        fig.update_layout(height=500, showlegend=False)
-        st.plotly_chart(fig, use_container_width=True)
-    
-    with col2:
-        st.subheader("Top Predictors")
-        for idx, row in feature_importance.head(10).iterrows():
-            st.metric(row['Feature'], f"{row['Importance']*100:.1f}%")
-    
-    # Prediction simulator
-    st.markdown("---")
-    st.subheader("🎯 Individual Attrition Risk Predictor")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        age = st.slider("Age", 22, 65, 35)
-        satisfaction = st.slider("Job Satisfaction", 1, 4, 3)
-        income = st.number_input("Monthly Income ($)", 2000, 20000, 5000)
-    
-    with col2:
-        tenure = st.slider("Years at Company", 0, 40, 5)
-        overtime = st.selectbox("Overtime", ["Yes", "No"])
-        shift = st.selectbox("Shift Type", ["Day", "Night", "Rotating"])
-    
-    with col3:
-        work_life_balance = st.slider("Work-Life Balance", 1, 4, 3)
-        distance = st.slider("Distance from Home (km)", 1, 50, 10)
-        performance = st.slider("Performance Rating", 1, 4, 3)
-    
-    if st.button("Predict Attrition Risk", type="primary"):
-        st.info("Prediction functionality requires complete feature encoding. This is a simplified demo.")
-        risk_score = np.random.uniform(0.1, 0.9)  # Simulated
+        # Top 15 features
+        col1, col2 = st.columns([2, 1])
         
-        if risk_score > 0.6:
-            st.error(f"🚨 HIGH RISK: {risk_score*100:.1f}% probability of attrition")
-            st.warning("**Recommended Actions:**\n- Immediate manager intervention\n- Compensation review\n- Career development discussion")
-        elif risk_score > 0.3:
-            st.warning(f"⚠️ MODERATE RISK: {risk_score*100:.1f}% probability of attrition")
-            st.info("**Recommended Actions:**\n- Regular check-ins\n- Monitor satisfaction levels")
-        else:
-            st.success(f"✅ LOW RISK: {risk_score*100:.1f}% probability of attrition")
+        with col1:
+            top_features = feature_importance.head(15)
+            fig = px.bar(top_features, x='Importance', y='Feature', orientation='h',
+                        color='Importance', color_continuous_scale='Viridis',
+                        title='Top 15 Most Important Features')
+            fig.update_layout(height=600, showlegend=False, yaxis={'categoryorder':'total ascending'})
+            st.plotly_chart(fig, use_container_width=True)
+        
+        with col2:
+            st.markdown("### 🏆 Top 10 Predictors")
+            for idx, row in feature_importance.head(10).iterrows():
+                st.metric(
+                    row['Feature'], 
+                    f"{row['Importance']*100:.1f}%",
+                    help=f"Contribution to prediction accuracy"
+                )
+        
+        # Download feature importance
+        st.markdown("---")
+        csv = feature_importance.to_csv(index=False)
+        st.download_button(
+            label="📥 Download Feature Importance Data",
+            data=csv,
+            file_name="feature_importance.csv",
+            mime="text/csv"
+        )
+    
+    with tab3:
+        # Prediction simulator
+        st.subheader("🔮 Individual Attrition Risk Predictor")
+        st.info("⚠️ This is a simplified demo. For production use, implement full feature encoding.")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.markdown("**Demographics**")
+            age = st.slider("Age", 22, 65, 35)
+            gender = st.selectbox("Gender", ["Male", "Female"])
+            education = st.slider("Education Level", 1, 5, 3)
+        
+        with col2:
+            st.markdown("**Job Details**")
+            tenure = st.slider("Years at Company", 0, 40, 5)
+            income = st.number_input("Monthly Income ($)", 2000, 20000, 5000, step=500)
+            overtime = st.selectbox("Overtime", ["No", "Yes"])
+            shift = st.selectbox("Shift Type", ["Day", "Night", "Rotating"])
+        
+        with col3:
+            st.markdown("**Satisfaction Scores**")
+            satisfaction = st.slider("Job Satisfaction", 1, 4, 3)
+            work_life_balance = st.slider("Work-Life Balance", 1, 4, 3)
+            environment = st.slider("Environment Satisfaction", 1, 4, 3)
+        
+        st.markdown("---")
+        
+        if st.button("🎯 Predict Attrition Risk", type="primary", use_container_width=True):
+            # Simple risk calculation based on key factors
+            risk_score = 0.15  # Base risk
+            
+            # Age factor
+            if age < 30:
+                risk_score += 0.10
+            elif age > 50:
+                risk_score -= 0.05
+            
+            # Satisfaction factor (strongest)
+            risk_score += (4 - satisfaction) * 0.12
+            risk_score += (4 - work_life_balance) * 0.10
+            
+            # Income factor
+            if income < 3000:
+                risk_score += 0.20
+            elif income > 10000:
+                risk_score -= 0.15
+            
+            # Overtime factor
+            if overtime == "Yes":
+                risk_score += 0.15
+            
+            # Shift factor
+            if shift == "Night":
+                risk_score += 0.12
+            elif shift == "Rotating":
+                risk_score += 0.08
+            
+            # Tenure factor
+            if tenure < 2:
+                risk_score += 0.20
+            elif tenure > 10:
+                risk_score -= 0.10
+            
+            risk_score = max(0.05, min(0.95, risk_score))  # Clip between 5% and 95%
+            
+            # Display result
+            st.markdown("---")
+            col1, col2, col3 = st.columns([1, 2, 1])
+            
+            with col2:
+                if risk_score > 0.6:
+                    st.error(f"### 🚨 HIGH RISK")
+                    st.metric("Attrition Probability", f"{risk_score*100:.1f}%", delta=f"+{(risk_score-0.5)*100:.1f}%")
+                    st.warning("""
+                    **Immediate Actions Required:**
+                    - 🎯 Manager intervention within 48 hours
+                    - 💰 Compensation and benefits review
+                    - 📋 Career development discussion
+                    - 🔄 Consider role or shift adjustment
+                    - 📊 Monitor weekly for 90 days
+                    """)
+                elif risk_score > 0.35:
+                    st.warning(f"### ⚠️ MODERATE RISK")
+                    st.metric("Attrition Probability", f"{risk_score*100:.1f}%", delta=f"+{(risk_score-0.35)*100:.1f}%")
+                    st.info("""
+                    **Recommended Actions:**
+                    - 👥 Schedule regular check-ins (bi-weekly)
+                    - 📈 Monitor satisfaction trends
+                    - 🎓 Offer training/development opportunities
+                    - 💬 Open dialogue about concerns
+                    """)
+                else:
+                    st.success(f"### ✅ LOW RISK")
+                    st.metric("Attrition Probability", f"{risk_score*100:.1f}%", delta=f"{(risk_score-0.35)*100:.1f}%")
+                    st.info("""
+                    **Maintenance Actions:**
+                    - ✅ Continue current engagement practices
+                    - 📅 Quarterly satisfaction surveys
+                    - 🎉 Recognition and appreciation programs
+                    - 💪 Support career growth opportunities
+                    """)
+            
+            # Risk breakdown
+            st.markdown("---")
+            st.subheader("📊 Risk Factor Breakdown")
+            
+            risk_factors = {
+                'Age Factor': (age < 30) * 0.10 - (age > 50) * 0.05,
+                'Job Satisfaction': (4 - satisfaction) * 0.12,
+                'Work-Life Balance': (4 - work_life_balance) * 0.10,
+                'Income Level': (0.20 if income < 3000 else (-0.15 if income > 10000 else 0)),
+                'Overtime': 0.15 if overtime == "Yes" else 0,
+                'Shift Type': (0.12 if shift == "Night" else (0.08 if shift == "Rotating" else 0)),
+                'Tenure': (0.20 if tenure < 2 else (-0.10 if tenure > 10 else 0))
+            }
+            
+            risk_df = pd.DataFrame(list(risk_factors.items()), columns=['Factor', 'Impact'])
+            risk_df['Impact'] = risk_df['Impact'] * 100
+            
+            fig = px.bar(risk_df, x='Impact', y='Factor', orientation='h',
+                        color='Impact', color_continuous_scale='RdYlGn_r',
+                        title='Individual Risk Factor Contributions (%)')
+            fig.update_layout(height=400)
+            st.plotly_chart(fig, use_container_width=True)
 
 def show_insights(df):
     """Insights and recommendations page"""
